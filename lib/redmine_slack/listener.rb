@@ -12,6 +12,11 @@ class SlackListener < Redmine::Hook::Listener
 
 		msg = "[#{escape issue.project}] #{escape issue.author} created <#{object_url issue}|#{escape issue}>#{mentions issue.description}"
 
+                # Should we log this change ?
+                Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+                  return if login.to_s == issue.author.login.to_s
+                end
+
 		attachment = {}
 		attachment[:text] = escape issue.description if issue.description
 		attachment[:fields] = [{
@@ -49,6 +54,10 @@ class SlackListener < Redmine::Hook::Listener
 		return if journal.private_notes?
 
 		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>#{mentions journal.notes}"
+                # Should we log this change ?
+                Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+                  return if login.to_s == journal.user.login.to_s
+                end
 
 		attachment = {}
 		attachment[:text] = escape journal.notes if journal.notes

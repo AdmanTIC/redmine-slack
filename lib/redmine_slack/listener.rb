@@ -261,23 +261,31 @@ private
 	end
 
 	def generate_short_notification(journal)
-		long_field = ["status", "priority", "due_date"]
-		long_feedback = []
-		short_feedback = []
+		field_to_expand = Setting.plugin_redmine_slack['expanded_fields'].split(',')
+		title_value = []
+		only_title = []
 
 		journal.details.each do |detail|
 			field = detail_to_field(detail)
 			field[:value] = "removed" if field[:value].empty? or field[:value].nil?
 
-			if long_field.include?(field[:orig_field])
-				long_feedback << "*#{escape field[:title]}:* `#{escape field[:value]}`"
+			if field_to_expand.include?(field[:orig_field])
+				title_value << "*#{escape field[:title]}:* `#{escape field[:value]}`"
 			else
-				short_feedback << "`#{escape field[:title]}`"
+				only_title << "`#{escape field[:title]}`"
 			end
 		end
 
-		sep = long_feedback.empty? ? "" : " | "
-		"\n" + long_feedback.join(' | ') + sep + "*Others:* " + short_feedback.join(', ')
+		notification = "\n"
+		if not title_value.empty?
+			notification << title_value.join(' | ')
+		end
+		if not only_title.empty?
+			notification << " | " if not title_value.empty?
+			notification << "*Others:* "
+			notification << only_title.join(', ')
+		end
+		notification
 	end
 
 	def detail_to_field(detail)

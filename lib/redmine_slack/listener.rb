@@ -1,3 +1,4 @@
+# coding: utf-8
 require 'httpclient'
 
 class SlackListener < Redmine::Hook::Listener
@@ -10,36 +11,19 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url
 		return if issue.is_private?
 
-		msg = "[#{escape issue.project}] #{escape issue.author} created <#{object_url issue}|#{escape issue}>#{mentions issue.description}"
-
-                # Should we log this change ?
-                Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
-                  return if login.to_s == issue.author.login.to_s
-                end
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == issue.author.login.to_s
+		end
 
 		attachment = {}
-		attachment[:text] = escape issue.description if issue.description
-		attachment[:fields] = [{
-			:title => I18n.t("field_status"),
-			:value => escape(issue.status.to_s),
-			:short => true
-		}, {
-			:title => I18n.t("field_priority"),
-			:value => escape(issue.priority.to_s),
-			:short => true
-		}, {
-			:title => I18n.t("field_assigned_to"),
-			:value => escape(issue.assigned_to.to_s),
-			:short => true
-		}]
+		attachment[:mrkdwn_in] = ["text"]
+		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *CREATION* | _#{escape issue.author}_\n"
+		attachment[:text] << "*#{I18n.t "field_status"}:* `#{escape issue.status.to_s}`"
+		attachment[:text] << " | *#{I18n.t "field_priority"}:* `#{escape issue.priority.to_s}`"
+		attachment[:text] << " | *#{I18n.t "field_due_date"}:* `#{escape issue.due_date.to_s}`" if issue.due_date
 
-		attachment[:fields] << {
-			:title => I18n.t("field_watcher"),
-			:value => escape(issue.watcher_users.join(', ')),
-			:short => true
-		} if Setting.plugin_redmine_slack['display_watchers'] == 'yes'
-
-		speak msg, channel, attachment, url
+		speak "", channel, attachment, url
 	end
 
 	def controller_issues_edit_after_save(context={})
@@ -53,17 +37,17 @@ class SlackListener < Redmine::Hook::Listener
 		return if issue.is_private?
 		return if journal.private_notes?
 
-		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>#{mentions journal.notes}"
-                # Should we log this change ?
-                Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
-                  return if login.to_s == journal.user.login.to_s
-                end
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == journal.user.login.to_s
+		end
 
 		attachment = {}
-		attachment[:text] = escape journal.notes if journal.notes
-		attachment[:fields] = journal.details.map { |d| detail_to_field d }
+		attachment[:mrkdwn_in] = ["text"]
+		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+		attachment[:text] << generate_short_feedback(journal)
 
-		speak msg, channel, attachment, url
+		speak "", channel, attachment, url
 	end
 
 	def model_changeset_scan_commit_for_issue_ids_pre_issue_update(context={})
@@ -77,7 +61,9 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url and issue.save
 		return if issue.is_private?
 
-		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>"
+		attachment = {}
+		attachment[:mrkdwn_in] = ["text"]
+		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
 
 		repository = changeset.repository
 
@@ -106,11 +92,11 @@ class SlackListener < Redmine::Hook::Listener
 			)
 		end
 
-		attachment = {}
-		attachment[:text] = ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
-		attachment[:fields] = journal.details.map { |d| detail_to_field d }
+		attachment[:text] << generate_short_feedback(journal)
+		attachment[:text] << "\n"
+		attachment[:text] << ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
 
-		speak msg, channel, attachment, url
+		speak "", channel, attachment, url
 	end
 
 	def controller_wiki_edit_after_save(context = { })
@@ -220,6 +206,26 @@ private
 		val
 	end
 
+	def generate_short_feedback(journal)
+		long_field = ["status", "priority", "due_date"]
+		long_feedback = []
+		short_feedback = []
+
+		journal.details.each do |detail|
+			field = detail_to_field(detail)
+			field[:value] = "removed" if field[:value].empty? or field[:value].nil?
+
+			if long_field.include?(field[:orig_field])
+				long_feedback << "*#{escape field[:title]}:* `#{escape field[:value]}`"
+			else
+				short_feedback << "`#{escape field[:title]}`"
+			end
+		end
+
+		sep = long_feedback.empty? ? "" : " | "
+		"\n" + long_feedback.join(' | ') + sep + "*Others:* " + short_feedback.join(', ')
+	end
+
 	def detail_to_field(detail)
 		if detail.property == "cf"
 			key = CustomField.find(detail.prop_key).name rescue nil
@@ -273,13 +279,13 @@ private
 
 		value = "-" if value.empty?
 
-		result = { :title => title, :value => value }
+		result = { :title => title, :value => value, :orig_field => key }
 		result[:short] = true if short
 		result
 	end
 
 	def mentions text
-		names = extract_usernames text
+                names = extract_usernames text
 		names.present? ? "\nTo: " + names.join(', ') : nil
 	end
 
@@ -293,3 +299,9 @@ private
 		text.scan(/@[a-z0-9][a-z0-9_\-]*/).uniq
 	end
 end
+
+# Local Variables:
+# ruby-indent-level: 8
+# tab-width: 8
+# indent-tabs-mode: t
+# End:

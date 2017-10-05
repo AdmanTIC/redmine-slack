@@ -1,3 +1,4 @@
+# coding: utf-8
 require 'httpclient'
 
 class SlackListener < Redmine::Hook::Listener
@@ -10,6 +11,23 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url
 		return if issue.is_private?
 
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == issue.author.login.to_s
+		end
+
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *CREATION* | _#{escape issue.author}_\n"
+			attachment[:text] << "*#{I18n.t "field_status"}:* `#{escape issue.status.to_s}`"
+			attachment[:text] << " | *#{I18n.t "field_priority"}:* `#{escape issue.priority.to_s}`"
+			attachment[:text] << " | *#{I18n.t "field_due_date"}:* `#{escape issue.due_date.to_s}`" if issue.due_date
+			return speak "", channel, attachment, url
+		end
+
+		# long notification
 		msg = "[#{escape issue.project}] #{escape issue.author} created <#{object_url issue}|#{escape issue}>#{mentions issue.description}"
 
 		attachment = {}
@@ -48,6 +66,21 @@ class SlackListener < Redmine::Hook::Listener
 		return if issue.is_private?
 		return if journal.private_notes?
 
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == journal.user.login.to_s
+		end
+
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+			attachment[:text] << generate_short_notification(journal)
+			return speak "", channel, attachment, url
+		end
+
+		# long notification
 		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>#{mentions journal.notes}"
 
 		attachment = {}
@@ -68,7 +101,10 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url and issue.save
 		return if issue.is_private?
 
-		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>"
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == issue.author.login.to_s
+		end
 
 		repository = changeset.repository
 
@@ -97,6 +133,19 @@ class SlackListener < Redmine::Hook::Listener
 			)
 		end
 
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+			attachment[:text] << generate_short_notification(journal)
+			attachment[:text] << "\n"
+			attachment[:text] << ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
+			return speak "", channel, attachment, url
+		end
+
+		# long notification
+		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>"
 		attachment = {}
 		attachment[:text] = ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
 		attachment[:fields] = journal.details.map { |d| detail_to_field d }
@@ -211,6 +260,34 @@ private
 		val
 	end
 
+	def generate_short_notification(journal)
+		field_to_expand = Setting.plugin_redmine_slack['expanded_fields'].split(',')
+		title_value = []
+		only_title = []
+
+		journal.details.each do |detail|
+			field = detail_to_field(detail)
+			field[:value] = "removed" if field[:value].empty? or field[:value].nil?
+
+			if field_to_expand.include?(field[:orig_field])
+				title_value << "*#{escape field[:title]}:* `#{escape field[:value]}`"
+			else
+				only_title << "`#{escape field[:title]}`"
+			end
+		end
+
+		notification = "\n"
+		if not title_value.empty?
+			notification << title_value.join(' | ')
+		end
+		if not only_title.empty?
+			notification << " | " if not title_value.empty?
+			notification << "*Others:* "
+			notification << only_title.join(', ')
+		end
+		notification
+	end
+
 	def detail_to_field(detail)
 		if detail.property == "cf"
 			key = CustomField.find(detail.prop_key).name rescue nil
@@ -264,13 +341,13 @@ private
 
 		value = "-" if value.empty?
 
-		result = { :title => title, :value => value }
+		result = { :title => title, :value => value, :orig_field => key }
 		result[:short] = true if short
 		result
 	end
 
 	def mentions text
-		names = extract_usernames text
+                names = extract_usernames text
 		names.present? ? "\nTo: " + names.join(', ') : nil
 	end
 
@@ -284,3 +361,9 @@ private
 		text.scan(/@[a-z0-9][a-z0-9_\-]*/).uniq
 	end
 end
+
+# Local Variables:
+# ruby-indent-level: 8
+# tab-width: 8
+# indent-tabs-mode: t
+# End:

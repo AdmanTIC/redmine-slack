@@ -33,6 +33,14 @@
 </p>
 
 <p>
+	<label for="settings_short_notification">Short notification?</label>
+	<select id="settings_short_notification" value="<%= settings['short_notification'] %>" name="settings[short_notification]">
+		<option value="yes">Yes</option>
+		<option value="no" <%= settings['short_notification'] != 'yes' ? %q(selected="selected") : '' %>>No</option>
+	</select>
+</p>
+
+<p>
 	<label for="settings_display_watchers">Display Watchers?</label>
 	<select id="settings_display_watchers" value="<%= settings['display_watchers'] %>" name="settings[display_watchers]">
 		<option value="yes">Yes</option>

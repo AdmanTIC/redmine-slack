@@ -16,14 +16,43 @@ class SlackListener < Redmine::Hook::Listener
 			return if login.to_s == issue.author.login.to_s
 		end
 
-		attachment = {}
-		attachment[:mrkdwn_in] = ["text"]
-		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *CREATION* | _#{escape issue.author}_\n"
-		attachment[:text] << "*#{I18n.t "field_status"}:* `#{escape issue.status.to_s}`"
-		attachment[:text] << " | *#{I18n.t "field_priority"}:* `#{escape issue.priority.to_s}`"
-		attachment[:text] << " | *#{I18n.t "field_due_date"}:* `#{escape issue.due_date.to_s}`" if issue.due_date
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *CREATION* | _#{escape issue.author}_\n"
+			attachment[:text] << "*#{I18n.t "field_status"}:* `#{escape issue.status.to_s}`"
+			attachment[:text] << " | *#{I18n.t "field_priority"}:* `#{escape issue.priority.to_s}`"
+			attachment[:text] << " | *#{I18n.t "field_due_date"}:* `#{escape issue.due_date.to_s}`" if issue.due_date
+			return speak "", channel, attachment, url
+		end
 
-		speak "", channel, attachment, url
+		# long notification
+		msg = "[#{escape issue.project}] #{escape issue.author} created <#{object_url issue}|#{escape issue}>#{mentions issue.description}"
+
+		attachment = {}
+		attachment[:text] = escape issue.description if issue.description
+		attachment[:fields] = [{
+			:title => I18n.t("field_status"),
+			:value => escape(issue.status.to_s),
+			:short => true
+		}, {
+			:title => I18n.t("field_priority"),
+			:value => escape(issue.priority.to_s),
+			:short => true
+		}, {
+			:title => I18n.t("field_assigned_to"),
+			:value => escape(issue.assigned_to.to_s),
+			:short => true
+		}]
+
+		attachment[:fields] << {
+			:title => I18n.t("field_watcher"),
+			:value => escape(issue.watcher_users.join(', ')),
+			:short => true
+		} if Setting.plugin_redmine_slack['display_watchers'] == 'yes'
+
+		speak msg, channel, attachment, url
 	end
 
 	def controller_issues_edit_after_save(context={})
@@ -42,12 +71,23 @@ class SlackListener < Redmine::Hook::Listener
 			return if login.to_s == journal.user.login.to_s
 		end
 
-		attachment = {}
-		attachment[:mrkdwn_in] = ["text"]
-		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
-		attachment[:text] << generate_short_feedback(journal)
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+			attachment[:text] << generate_short_notification(journal)
+			return speak "", channel, attachment, url
+		end
 
-		speak "", channel, attachment, url
+		# long notification
+		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>#{mentions journal.notes}"
+
+		attachment = {}
+		attachment[:text] = escape journal.notes if journal.notes
+		attachment[:fields] = journal.details.map { |d| detail_to_field d }
+
+		speak msg, channel, attachment, url
 	end
 
 	def model_changeset_scan_commit_for_issue_ids_pre_issue_update(context={})
@@ -61,9 +101,10 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url and issue.save
 		return if issue.is_private?
 
-		attachment = {}
-		attachment[:mrkdwn_in] = ["text"]
-		attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+		# Should we log this change ?
+		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
+			return if login.to_s == issue.author.login.to_s
+		end
 
 		repository = changeset.repository
 
@@ -92,11 +133,24 @@ class SlackListener < Redmine::Hook::Listener
 			)
 		end
 
-		attachment[:text] << generate_short_feedback(journal)
-		attachment[:text] << "\n"
-		attachment[:text] << ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
+		# short notification
+		if Setting.plugin_redmine_slack['short_notification'] == 'yes'
+			attachment = {}
+			attachment[:mrkdwn_in] = ["text"]
+			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
+			attachment[:text] << generate_short_notification(journal)
+			attachment[:text] << "\n"
+			attachment[:text] << ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
+			return speak "", channel, attachment, url
+		end
 
-		speak "", channel, attachment, url
+		# long notification
+		msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>"
+		attachment = {}
+		attachment[:text] = ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
+		attachment[:fields] = journal.details.map { |d| detail_to_field d }
+
+		speak msg, channel, attachment, url
 	end
 
 	def controller_wiki_edit_after_save(context = { })
@@ -206,7 +260,7 @@ private
 		val
 	end
 
-	def generate_short_feedback(journal)
+	def generate_short_notification(journal)
 		long_field = ["status", "priority", "due_date"]
 		long_feedback = []
 		short_feedback = []

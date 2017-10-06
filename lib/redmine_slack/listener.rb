@@ -149,8 +149,6 @@ class SlackListener < Redmine::Hook::Listener
 			attachment[:mrkdwn_in] = ["text"]
 			attachment[:text] = "#{escape issue.project} | <#{object_url issue}|#{escape issue}> | *UPDATE* | _#{escape journal.user}_"
 			attachment[:text] << generate_short_notification(journal)
-			attachment[:text] << "\n"
-			attachment[:text] << ll(Setting.default_language, :text_status_changed_by_changeset, "<#{revision_url}|#{escape changeset.comments}>")
 		else
 			# long notification
 			msg = "[#{escape issue.project}] #{escape journal.user.to_s} updated <#{object_url issue}|#{escape issue}>"
@@ -276,13 +274,21 @@ private
 
 	def generate_short_notification(journal)
 		field_to_expand = Setting.plugin_redmine_slack['expanded_fields'].split(',')
+		fields = []
 		title_value = []
 		only_title = []
 
 		journal.details.each do |detail|
 			field = detail_to_field(detail)
 			field[:value] = "removed" if field[:value].empty? or field[:value].nil?
+			fields << field
+		end
 
+		if not journal.notes.empty?
+			fields << {:title => "Notes", :value => journal.notes.to_s, :orig_field => "notes"}
+		end
+
+		fields.each do |field|
 			if field_to_expand.include?(field[:orig_field])
 				title_value << "*#{escape field[:title]}:* `#{escape field[:value]}`"
 			else

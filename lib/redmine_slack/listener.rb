@@ -11,11 +11,6 @@ class SlackListener < Redmine::Hook::Listener
 		return unless channel and url
 		return if issue.is_private?
 
-		# Should we log this change ?
-		Setting.plugin_redmine_slack['exclude_login'].split(",").each do |login|
-			return if login.to_s == issue.author.login.to_s
-		end
-
 		attachment = {}
 
 		# attachment color
